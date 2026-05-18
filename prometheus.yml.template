@@ -1,0 +1,103 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alertrules/*.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+scrape_configs:
+  # - job_name: 'prometheus'
+  #   static_configs:
+  #     - targets: ['${SERVER_IP}:9090']
+  #   scrape_interval: 30s
+# OpenTelemetry Collector metrics
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8889']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 30s
+
+  - job_name: 'docker'
+    static_configs:
+      - targets: ['${SERVER_IP}:9323']
+    scrape_interval: 30s
+
+  # - job_name: 'k6'
+  #   static_configs:
+  #     - targets: ['k6-aggregator:9090']  # Changed from 6565
+  #   scrape_interval: 1s
+  #   scrape_timeout: 500ms
+
+  - job_name: 'pushgateway'
+    honor_labels: true
+    static_configs:
+      - targets: ['pushgateway:9091']
+    scrape_interval: 30s
+
+ # Blackbox - Monitor annotation service
+  - job_name: 'blackbox-annotation'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://${SERVER_IP}:5007/health        # Direct service
+          - http://${SERVER_IP}:5558/health        # Through Caddy
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # Blackbox - Monitor other services
+  - job_name: 'blackbox-services'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://${SERVER_IP}:8080              # SigNoz
+          - http://${SERVER_IP}:6565              # Grafana
+          - http://${SERVER_IP}:9090              # Prometheus
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # Blackbox - Check databases TCP
+  - job_name: 'blackbox-databases'
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets:
+          - ${SERVER_IP}:27020                    # MongoDB
+          - ${SERVER_IP}:6382                     # Redis
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

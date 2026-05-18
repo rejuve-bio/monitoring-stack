@@ -7,7 +7,7 @@ services:
     container_name: prometheus
     user: "65534:65534"  # nobody user
     ports:
-      - "6566:9090"
+      - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - ./prometheus/:/prometheus/
@@ -31,8 +31,10 @@ services:
     ports:
       - "6565:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=Atomspace123
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=https://${MONITORING_DOMAIN}/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
     volumes:
       - ./grafana/data/:/var/lib/grafana
       - ./grafana/provisioning/:/etc/grafana/provisioning/
@@ -64,12 +66,13 @@ services:
   loki:
     image: grafana/loki:latest
     container_name: loki
-    user: "10001:10001"  # loki user
+    user: "10001:10001"
     ports:
       - "3100:3100"
     command: -config.file=/etc/loki/local-config.yaml
     volumes:
-      - ./loki/:/loki/
+      - ./loki/local-config.yaml:/etc/loki/local-config.yaml:ro
+      - ./loki/data:/loki
     restart: unless-stopped
     networks:
       - monitoring
@@ -81,12 +84,31 @@ services:
     volumes:
       - ./promtail/config.yml:/etc/promtail/config.yml
       - /var/log:/var/log:ro
+      - /var/log/pods:/var/log/pods:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+       # Galaxy logs
+      - /var/log/galaxy-gunicorn.log:/var/log/galaxy-gunicorn.log:ro
+      - /var/log/galaxy-celery-beat.log:/var/log/galaxy-celery-beat.log:ro
+      - /var/log/galaxy-celery.log:/var/log/galaxy-celery.log:ro
+      - /var/log/galaxy-gx-it.log:/var/log/galaxy-gx-it.log:ro
+      - /var/log/galaxy-handler0.log:/var/log/galaxy-handler0.log:ro
+      - /var/log/galaxy-handler1.log:/var/log/galaxy-handler1.log:ro
+      - /var/log/galaxy-handler2.log:/var/log/galaxy-handler2.log:ro
+      - /var/log/galaxy-handler3.log:/var/log/galaxy-handler3.log:ro
+      - /var/log/galaxy-handler4.log:/var/log/galaxy-handler4.log:ro
+      # AI_Assistant service logs
+      - /home/abdum/services/AI-Assistant/logfiles:/AI-Assistant/logfiles:ro
+      # Annotation service logs
+      - /home/abdum/services/annotation-query-backend/logs:/annotation-query-backend/logs:ro
+
     command: -config.file=/etc/promtail/config.yml
     restart: unless-stopped
     networks:
       - monitoring
       - hypothesis_network
+    depends_on:
+      - loki
   # Node Exporter - System metrics
   node-exporter:
     image: prom/node-exporter:latest
@@ -111,6 +133,8 @@ services:
     image: prom/alertmanager:latest
     container_name: alertmanager
     user: "65534:65534"  # nobody user
+    env_file:
+      - alertmanager/.env
     ports:
       - "9093:9093"
     volumes:
@@ -119,10 +143,82 @@ services:
     command:
       - '--config.file=/etc/alertmanager/config.yml'
       - '--storage.path=/alertmanager'
+      - '--config.expand-env=true'
     restart: unless-stopped
     networks:
       - monitoring
       - hypothesis_network
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector-central
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "14318:14318"   # OTLP HTTP receiver
+      - "14317:14317"   # OTLP gRPC receiver
+    depends_on:
+      - jaeger
+    restart: unless-stopped
+    networks:
+      - monitoring
+      - hypothesis_network
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger-central
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"  # Jaeger UI
+    restart: unless-stopped
+    networks:
+      - monitoring
+      - hypothesis_network
+  pushgateway:
+    image: prom/pushgateway:latest
+    container_name: pushgateway
+    ports:
+      - "9091:9091"
+    restart: unless-stopped
+    networks:
+      - monitoring
+  k6:
+    image: grafana/k6:latest
+    container_name: k6
+    env_file:
+      - k6-tests/.env
+    volumes:
+      - ./k6-tests:/scripts
+    networks:
+      - monitoring
+      - hypothesis_network
+    entrypoint: ["/bin/sh", "-c", "sleep infinity"]
+    restart: unless-stopped
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    container_name: blackbox-exporter
+    ports:
+      - "9115:9115"
+    volumes:
+      - ./blackbox/config.yml:/etc/blackbox_exporter/config.yml:ro
+    command:
+      - '--config.file=/etc/blackbox_exporter/config.yml'
+    restart: unless-stopped
+    networks:
+      - monitoring
+      - hypothesis_network
+  pyroscope:
+    image: grafana/pyroscope:latest
+    ports:
+      - "4042:4040"
+    #data to persist
+    volumes:
+      - pyroscope-data:/var/lib/pyroscope
+    restart: unless-stopped
+volumes:
+  pyroscope-data:
+
 networks:
   monitoring:
     driver: bridge

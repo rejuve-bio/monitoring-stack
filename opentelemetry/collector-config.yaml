@@ -1,0 +1,56 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 10s
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 400
+    spike_limit_mib: 100
+
+exporters:
+  # Debug for troubleshooting
+  debug:
+    verbosity: detailed
+
+  # Send metrics to Prometheus
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: otel
+
+  # Send traces to Jaeger using OTLP (Jaeger supports OTLP)
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # Send logs to Loki (Loki doesn't support OTLP natively, so we'll use debug for now)
+  # We'll handle Loki integration through Promtail for application logs
+
+extensions:
+  health_check:
+
+service:
+  extensions: [health_check]
+  
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, memory_limiter]
+      exporters: [otlp/jaeger, debug]
+    
+    metrics:
+      receivers: [otlp]
+      processors: [batch, memory_limiter]
+      exporters: [prometheus, debug]
+    
+    logs:
+      receivers: [otlp]
+      processors: [batch, memory_limiter]
+      exporters: [debug]  # Just debug for now - we'll handle Loki separately

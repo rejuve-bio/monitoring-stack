@@ -1,0 +1,42 @@
+groups:
+  - name: k6_performance_alerts
+    rules:
+      - alert: K6HighLatency
+        expr: k6_http_req_duration_p95_ms > 15000
+        for: 0m
+        labels:
+          severity: warning
+          service: ai-assistant
+        annotations:
+          summary: "k6: High p95 latency on AI Assistant"
+          description: "p95 response time is {{ $value | humanizeDuration }} — threshold is 15s. Last test run exceeded acceptable baseline."
+
+      - alert: K6HighErrorRate
+        expr: k6_error_rate > 10
+        for: 0m
+        labels:
+          severity: critical
+          service: ai-assistant
+        annotations:
+          summary: "k6: High error rate on AI Assistant"
+          description: "Error rate is {{ $value }}% — threshold is 10%. Service may be degraded."
+
+      - alert: K6LowQuerySuccessRate
+        expr: k6_query_success_rate < 80
+        for: 0m
+        labels:
+          severity: warning
+          service: ai-assistant
+        annotations:
+          summary: "k6: Low query success rate on AI Assistant"
+          description: "Query success rate is {{ $value }}% — below 80% threshold."
+
+      - alert: K6TestMetricsStale
+        expr: (time() - timestamp(k6_http_reqs_total)) > 90000
+        for: 0m
+        labels:
+          severity: warning
+          service: ai-assistant
+        annotations:
+          summary: "k6: No test results received in 25 hours"
+          description: "The daily smoke test may not be running. Last metrics are more than 25 hours old."
